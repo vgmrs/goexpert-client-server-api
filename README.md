@@ -5,6 +5,16 @@ Exercise Client Server API for postgraduate Go Expert
 
 ## How to run
 
+To run client:
+```
+go run client/client.go
+```
+
+To run server:
+```
+go run server/server.go
+```
+
 ## Requirements
 
 Você precisará nos entregar dois sistemas em Go:
