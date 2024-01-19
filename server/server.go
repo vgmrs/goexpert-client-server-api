@@ -2,34 +2,46 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
+	"log"
 	"net/http"
+
+	"github.com/go-chi/chi"
 )
 
-func main() {
-	fmt.Println("[SERVER]")
-
+func getQuotation(w http.ResponseWriter, r *http.Request) {
 	url := "https://economia.awesomeapi.com.br/json/last/USD-BRL"
-	resp, err := http.Get(url)
+	res, err := http.Get(url)
 	if err != nil {
-		fmt.Println("[SERVER] Error:", err)
+		log.Println("Error getting quote:", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	defer resp.Body.Close()
+	defer res.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		fmt.Println("[SERVER] Error:", err)
+		log.Println("Error reading response:", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
 	var result map[string]interface{}
 
 	if err := json.Unmarshal(body, &result); err != nil {
-		fmt.Println("[SERVER] Error:", err)
+		log.Println("Error formatting response:", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Println(result)
+	w.Header().Add("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func main() {
+	r := chi.NewRouter()
+	r.Get("/cotacao", getQuotation)
+
+	log.Println("Start server...")
+	http.ListenAndServe(":8080", r)
 }
