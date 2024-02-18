@@ -7,10 +7,18 @@ Exercise Client Server API for postgraduate Go Expert
 
 To run client:
 ```
+make client
+```
+or:
+```
 go run client/client.go
 ```
 
 To run server:
+```
+make server
+```
+or:
 ```
 go run server/server.go
 ```
