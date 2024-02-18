@@ -1,5 +1,5 @@
-client:
+run-client:
 	@go run client/client.go
 
-server:
+run-server:
 	@go run server/server.go
