@@ -7,7 +7,7 @@ Exercise Client Server API for postgraduate Go Expert
 
 To run client:
 ```
-make client
+make start-client
 ```
 or:
 ```
@@ -16,7 +16,7 @@ go run client/client.go
 
 To run server:
 ```
-make server
+make start-server
 ```
 or:
 ```

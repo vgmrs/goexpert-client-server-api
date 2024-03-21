@@ -6,12 +6,33 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi"
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func getQuotation() (map[string]interface{}, error) {
+var (
+	db     *sql.DB
+	dbOnce sync.Once
+)
+
+type Quotation struct {
+	ASK         float32       `json:"USDBRL.ask"`
+	BID         float32       `json:"USDBRL.bid"`
+	Code        string        `json:"USDBRL.code"`
+	CodeIn      string        `json:"USDBRL.codein"`
+	CreatedDate time.Time     `json:"USDBRL.create_date"`
+	High        float32       `json:"USDBRL.high"`
+	Low         float32       `json:"USDBRL.low"`
+	Name        string        `json:"USDBRL.name"`
+	PCTChange   float32       `json:"USDBRL.pctChange"`
+	Timestamp   time.Duration `json:"USDBRL.timestamp"`
+	VarBID      float32       `json:"USDBRL.varBid"`
+}
+
+func getQuotation() ([]byte, error) {
 	url := "https://economia.awesomeapi.com.br/json/last/USD-BRL"
 	res, err := http.Get(url)
 	if err != nil {
@@ -26,25 +47,29 @@ func getQuotation() (map[string]interface{}, error) {
 		return nil, err
 	}
 
-	var result map[string]interface{}
-
-	if err := json.Unmarshal(body, &result); err != nil {
-		log.Println("Error formatting response:", err)
-		return nil, err
-	}
-
-	return result, nil
+	return body, nil
 }
 
-func getDB() (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", "./database.db")
-	if err != nil {
-		log.Println("Error on open database connection:", err)
-		return nil, err
-	}
-	defer db.Close()
+func getDB() *sql.DB {
+	dbOnce.Do(func() {
+		conn, err := sql.Open("sqlite3", "database.db")
+		if err != nil {
+			log.Fatal("Error on open database connection:", err)
+			panic(err)
+		}
 
-	return db, err
+		db = conn
+	})
+
+	return db
+}
+
+func closeDB() {
+	if db != nil {
+		db.Close()
+
+		db = nil
+	}
 }
 
 func createTable(db *sql.DB) error {
@@ -62,13 +87,10 @@ func createTable(db *sql.DB) error {
 	return nil
 }
 
-func registerQuotation(quotation map[string]interface{}) error {
-	db, err := getDB()
-	if err != nil {
-		return err
-	}
+func registerQuotation(quotation *Quotation) error {
+	db := getDB()
 
-	_, err = db.Exec("INSERT INTO quotation (quotation) VALUES (?)", quotation)
+	_, err := db.Exec("INSERT INTO quotation (quotation) VALUES (?)", quotation)
 	if err != nil {
 		log.Println("Error when inserting data into table:", err)
 		return err
@@ -80,27 +102,33 @@ func registerQuotation(quotation map[string]interface{}) error {
 }
 
 func handlerQuotation(w http.ResponseWriter, r *http.Request) {
-	quotation, err := getQuotation()
+	resp, err := getQuotation()
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
-	registerQuotation(quotation)
+	quotation := Quotation{}
+
+	err = json.Unmarshal(resp, &quotation)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	registerQuotation(&quotation)
 
 	w.Header().Add("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(quotation)
 }
 
 func init() {
-	db, err := getDB()
-	if err != nil {
-		log.Fatal("Error opening database connection:", err)
-	}
+	db := getDB()
 
-	err = createTable(db)
+	err := createTable(db)
 	if err != nil {
 		log.Fatal("Error creating table:", err)
+		panic(err)
 	}
 }
 
@@ -109,5 +137,10 @@ func main() {
 	r.Get("/cotacao", handlerQuotation)
 
 	log.Println("Start server...")
-	http.ListenAndServe(":8080", r)
+
+	if err := http.ListenAndServe(":8080", r); err != nil && err != http.ErrServerClosed {
+		log.Fatal("Server listen failed:", err)
+		closeDB()
+		panic(err)
+	}
 }
