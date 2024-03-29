@@ -3,11 +3,10 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"io"
+	"errors"
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/go-chi/chi"
 	_ "github.com/mattn/go-sqlite3"
@@ -19,35 +18,40 @@ var (
 )
 
 type Quotation struct {
-	ASK         float32   `json:"USDBRL.ask"`
-	BID         float32   `json:"USDBRL.bid"`
-	Code        string    `json:"USDBRL.code"`
-	CodeIn      string    `json:"USDBRL.code_in"`
-	CreatedDate time.Time `json:"USDBRL.create_date"`
-	High        float32   `json:"USDBRL.high"`
-	Low         float32   `json:"USDBRL.low"`
-	Name        string    `json:"USDBRL.name"`
-	PCTChange   float32   `json:"USDBRL.pct_change"`
-	Timestamp   string    `json:"USDBRL.timestamp"`
-	VarBID      float32   `json:"USDBRL.var_bid"`
+	ASK       string `json:"ask"`
+	BID       string `json:"bid"`
+	Code      string `json:"code"`
+	CodeIn    string `json:"codein"`
+	High      string `json:"high"`
+	Low       string `json:"low"`
+	Name      string `json:"name"`
+	PCTChange string `json:"pctChange"`
+	VarBID    string `json:"varBid"`
 }
 
-func getQuotation() ([]byte, error) {
+func getQuotation() (*Quotation, error) {
 	url := "https://economia.awesomeapi.com.br/json/last/USD-BRL"
 	res, err := http.Get(url)
 	if err != nil {
-		log.Println("Error getting quote:", err)
+		log.Printf("Error getting quote: %v", err)
 		return nil, err
 	}
 	defer res.Body.Close()
 
-	body, err := io.ReadAll(res.Body)
+	var data map[string]Quotation
+	err = json.NewDecoder(res.Body).Decode(&data)
 	if err != nil {
-		log.Println("Error reading response:", err)
+		log.Printf("Error decoding JSON response: %v", err)
 		return nil, err
 	}
 
-	return body, nil
+	quotation, ok := data["USDBRL"]
+	if !ok {
+		log.Println("Error: No quotation found for USD-BRL")
+		return nil, errors.New("no quotation found for USD-BRL")
+	}
+
+	return &quotation, nil
 }
 
 func getDB() *sql.DB {
@@ -57,7 +61,6 @@ func getDB() *sql.DB {
 			log.Fatal("Error on open database connection:", err)
 			panic(err)
 		}
-
 		db = conn
 	})
 
@@ -78,19 +81,17 @@ func createTable(db *sql.DB) error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		ask DOUBLE,
 		bid DOUBLE,
-		code TEXT,
-		code_in TEXT,
-		created_date DATE,
+		code VARCHAR(256),
+		code_in VARCHAR(256),
 		high DOUBLE,
 		low DOUBLE,
-		name TEXT,
+		name VARCHAR(256),
 		pct_change DOUBLE,
-		timestamp TEXT,
 		var_bid DOUBLE
 	)
 	`)
 	if err != nil {
-		log.Println("Error on create table:", err)
+		log.Printf("Error on create table: %v", err)
 		return err
 	}
 
@@ -99,52 +100,49 @@ func createTable(db *sql.DB) error {
 
 func registerQuotation(q *Quotation) error {
 	db := getDB()
-
-	sql := `INSERT INTO quotation (ask, bid, code, code_in, created_date, high, low, name, pct_change, timestamp, var_bid) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
-	data := db.QueryRow(
+	sql := `INSERT INTO quotation (ask, bid, code, code_in, high, low, name, pct_change, var_bid) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+	_, err := db.Exec(
 		sql,
 		q.ASK,
 		q.BID,
 		q.Code,
 		q.CodeIn,
-		q.CreatedDate,
 		q.High,
 		q.Low,
 		q.Name,
 		q.PCTChange,
-		q.Timestamp,
 		q.VarBID,
 	)
+	if err != nil {
+		log.Printf("Failed to insert quotation: %v", err)
+		return err
+	}
 
-	log.Println("Quotation saved successfully!", data)
-
+	log.Printf("Quotation saved successfully!")
 	return nil
 }
 
 func handlerQuotation(w http.ResponseWriter, r *http.Request) {
-	resp, err := getQuotation()
+	quotation, err := getQuotation()
 	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		log.Printf("Error getting quotation: %v", err)
+		http.Error(w, "Error getting quotation", http.StatusInternalServerError)
 		return
 	}
 
-	quotation := Quotation{}
-
-	err = json.Unmarshal(resp, &quotation)
+	err = registerQuotation(quotation)
 	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		log.Printf("Error registering quotation: %v", err)
+		http.Error(w, "Error registering quotation", http.StatusInternalServerError)
 		return
 	}
 
-	registerQuotation(&quotation)
-
-	w.Header().Add("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(quotation)
 }
 
 func init() {
 	db := getDB()
-
 	err := createTable(db)
 	if err != nil {
 		log.Fatal("Error creating table:", err)
@@ -153,6 +151,8 @@ func init() {
 }
 
 func main() {
+	defer closeDB()
+
 	r := chi.NewRouter()
 	r.Get("/cotacao", handlerQuotation)
 
@@ -160,7 +160,6 @@ func main() {
 
 	if err := http.ListenAndServe(":8080", r); err != nil && err != http.ErrServerClosed {
 		log.Fatal("Server listen failed:", err)
-		closeDB()
 		panic(err)
 	}
 }
