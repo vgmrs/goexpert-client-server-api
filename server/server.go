@@ -19,17 +19,17 @@ var (
 )
 
 type Quotation struct {
-	ASK         float32       `json:"USDBRL.ask"`
-	BID         float32       `json:"USDBRL.bid"`
-	Code        string        `json:"USDBRL.code"`
-	CodeIn      string        `json:"USDBRL.codein"`
-	CreatedDate time.Time     `json:"USDBRL.create_date"`
-	High        float32       `json:"USDBRL.high"`
-	Low         float32       `json:"USDBRL.low"`
-	Name        string        `json:"USDBRL.name"`
-	PCTChange   float32       `json:"USDBRL.pctChange"`
-	Timestamp   time.Duration `json:"USDBRL.timestamp"`
-	VarBID      float32       `json:"USDBRL.varBid"`
+	ASK         float32   `json:"USDBRL.ask"`
+	BID         float32   `json:"USDBRL.bid"`
+	Code        string    `json:"USDBRL.code"`
+	CodeIn      string    `json:"USDBRL.code_in"`
+	CreatedDate time.Time `json:"USDBRL.create_date"`
+	High        float32   `json:"USDBRL.high"`
+	Low         float32   `json:"USDBRL.low"`
+	Name        string    `json:"USDBRL.name"`
+	PCTChange   float32   `json:"USDBRL.pct_change"`
+	Timestamp   string    `json:"USDBRL.timestamp"`
+	VarBID      float32   `json:"USDBRL.var_bid"`
 }
 
 func getQuotation() ([]byte, error) {
@@ -76,7 +76,17 @@ func createTable(db *sql.DB) error {
 	_, err := db.Exec(`
 	CREATE TABLE IF NOT EXISTS quotation (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		quotation TEXT
+		ask DOUBLE,
+		bid DOUBLE,
+		code TEXT,
+		code_in TEXT,
+		created_date DATE,
+		high DOUBLE,
+		low DOUBLE,
+		name TEXT,
+		pct_change DOUBLE,
+		timestamp TEXT,
+		var_bid DOUBLE
 	)
 	`)
 	if err != nil {
@@ -87,16 +97,26 @@ func createTable(db *sql.DB) error {
 	return nil
 }
 
-func registerQuotation(quotation *Quotation) error {
+func registerQuotation(q *Quotation) error {
 	db := getDB()
 
-	_, err := db.Exec("INSERT INTO quotation (quotation) VALUES (?)", quotation)
-	if err != nil {
-		log.Println("Error when inserting data into table:", err)
-		return err
-	}
+	sql := `INSERT INTO quotation (ask, bid, code, code_in, created_date, high, low, name, pct_change, timestamp, var_bid) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+	data := db.QueryRow(
+		sql,
+		q.ASK,
+		q.BID,
+		q.Code,
+		q.CodeIn,
+		q.CreatedDate,
+		q.High,
+		q.Low,
+		q.Name,
+		q.PCTChange,
+		q.Timestamp,
+		q.VarBID,
+	)
 
-	log.Println("Data saved successfully!")
+	log.Println("Quotation saved successfully!", data)
 
 	return nil
 }
