@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi"
 	_ "github.com/mattn/go-sqlite3"
@@ -29,11 +32,20 @@ type Quotation struct {
 	VarBID    string `json:"varBid"`
 }
 
-func getQuotation() (*Quotation, error) {
+func getQuotation(ctx context.Context) (*Quotation, error) {
+	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+
 	url := "https://economia.awesomeapi.com.br/json/last/USD-BRL"
-	res, err := http.Get(url)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		log.Printf("Error getting quote: %v", err)
+		log.Printf("Error creating HTTP request. %v", err)
+		return nil, err
+	}
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Printf("Error getting quote. %v", err)
 		return nil, err
 	}
 	defer res.Body.Close()
@@ -41,13 +53,13 @@ func getQuotation() (*Quotation, error) {
 	var data map[string]Quotation
 	err = json.NewDecoder(res.Body).Decode(&data)
 	if err != nil {
-		log.Printf("Error decoding JSON response: %v", err)
+		log.Printf("Error decoding JSON response. %v", err)
 		return nil, err
 	}
 
 	quotation, ok := data["USDBRL"]
 	if !ok {
-		log.Println("Error: No quotation found for USD-BRL")
+		log.Fatal("No quotation found for USD-BRL")
 		return nil, errors.New("no quotation found for USD-BRL")
 	}
 
@@ -58,7 +70,7 @@ func getDB() *sql.DB {
 	dbOnce.Do(func() {
 		conn, err := sql.Open("sqlite3", "database.db")
 		if err != nil {
-			log.Fatal("Error on open database connection:", err)
+			log.Fatalf("Error on open database connection. %v", err)
 			panic(err)
 		}
 		db = conn
@@ -91,17 +103,20 @@ func createTable(db *sql.DB) error {
 	)
 	`)
 	if err != nil {
-		log.Printf("Error on create table: %v", err)
+		log.Printf("Error on create table. %v", err)
 		return err
 	}
 
 	return nil
 }
 
-func registerQuotation(q *Quotation) error {
+func registerQuotation(ctx context.Context, q *Quotation) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+
 	db := getDB()
 	sql := `INSERT INTO quotation (ask, bid, code, code_in, high, low, name, pct_change, var_bid) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-	_, err := db.Exec(
+	_, err := db.ExecContext(ctx,
 		sql,
 		q.ASK,
 		q.BID,
@@ -114,7 +129,7 @@ func registerQuotation(q *Quotation) error {
 		q.VarBID,
 	)
 	if err != nil {
-		log.Printf("Failed to insert quotation: %v", err)
+		log.Printf("Failed to insert quotation. %v", err)
 		return err
 	}
 
@@ -123,29 +138,36 @@ func registerQuotation(q *Quotation) error {
 }
 
 func handlerQuotation(w http.ResponseWriter, r *http.Request) {
-	quotation, err := getQuotation()
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	quotation, err := getQuotation(ctx)
 	if err != nil {
-		log.Printf("Error getting quotation: %v", err)
-		http.Error(w, "Error getting quotation", http.StatusInternalServerError)
+		log.Printf("Error getting quotation. %v", err)
+		http.Error(w, fmt.Sprintf("Error getting quotation. %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	err = registerQuotation(quotation)
+	err = registerQuotation(ctx, quotation)
 	if err != nil {
-		log.Printf("Error registering quotation: %v", err)
-		http.Error(w, "Error registering quotation", http.StatusInternalServerError)
+		log.Printf("Error registering quotation. %v", err)
+		http.Error(w, fmt.Sprintf("Error registering quotation. %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(quotation)
+	if err := json.NewEncoder(w).Encode(quotation); err != nil {
+		log.Printf("Error encoding JSON response. %v", err)
+		http.Error(w, fmt.Sprintf("Error encoding JSON response. %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 func init() {
 	db := getDB()
 	err := createTable(db)
 	if err != nil {
-		log.Fatal("Error creating table:", err)
+		log.Fatalf("Error creating table. %v", err)
 		panic(err)
 	}
 }
@@ -159,7 +181,7 @@ func main() {
 	log.Println("Start server...")
 
 	if err := http.ListenAndServe(":8080", r); err != nil && err != http.ErrServerClosed {
-		log.Fatal("Server listen failed:", err)
+		log.Fatalf("Server listen failed. %v", err)
 		panic(err)
 	}
 }
