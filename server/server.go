@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -68,6 +67,8 @@ func getQuotation(ctx context.Context) (*Quotation, error) {
 
 func getDB() *sql.DB {
 	dbOnce.Do(func() {
+		log.Println("Starting database")
+
 		conn, err := sql.Open("sqlite3", "database.db")
 		if err != nil {
 			log.Fatalf("Error on open database connection. %v", err)
@@ -82,9 +83,10 @@ func getDB() *sql.DB {
 func closeDB() {
 	if db != nil {
 		db.Close()
-
 		db = nil
 	}
+
+	log.Println("Closing database")
 }
 
 func createTable(db *sql.DB) error {
@@ -164,6 +166,8 @@ func handlerQuotation(w http.ResponseWriter, r *http.Request) {
 }
 
 func init() {
+	log.Println("Starting sever...")
+
 	db := getDB()
 	err := createTable(db)
 	if err != nil {
@@ -173,14 +177,16 @@ func init() {
 }
 
 func main() {
+	port := ":8080"
+
 	defer closeDB()
 
-	r := chi.NewRouter()
-	r.Get("/cotacao", handlerQuotation)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /cotacao", handlerQuotation)
 
-	log.Println("Start server...")
+	log.Printf("Server is running on port %s", port)
 
-	if err := http.ListenAndServe(":8080", r); err != nil && err != http.ErrServerClosed {
+	if err := http.ListenAndServe(port, mux); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server listen failed. %v", err)
 		panic(err)
 	}
