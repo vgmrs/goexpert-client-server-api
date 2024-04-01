@@ -14,6 +14,14 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+const (
+	serverPort       string        = ":8080"
+	quotationURL     string        = "https://economia.awesomeapi.com.br/json/last/USD-BRL"
+	quotationTimeout time.Duration = 200 * time.Millisecond
+	databaseName     string        = "database.db"
+	databaseTimeout  time.Duration = 10 * time.Millisecond
+)
+
 var (
 	db     *sql.DB
 	dbOnce sync.Once
@@ -32,19 +40,16 @@ type Quotation struct {
 }
 
 func getQuotation(ctx context.Context) (*Quotation, error) {
-	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, quotationTimeout)
 	defer cancel()
 
-	url := "https://economia.awesomeapi.com.br/json/last/USD-BRL"
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", quotationURL, nil)
 	if err != nil {
-		log.Printf("Error creating HTTP request. %v", err)
 		return nil, err
 	}
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Printf("Error getting quote. %v", err)
 		return nil, err
 	}
 	defer res.Body.Close()
@@ -52,13 +57,11 @@ func getQuotation(ctx context.Context) (*Quotation, error) {
 	var data map[string]Quotation
 	err = json.NewDecoder(res.Body).Decode(&data)
 	if err != nil {
-		log.Printf("Error decoding JSON response. %v", err)
 		return nil, err
 	}
 
 	quotation, ok := data["USDBRL"]
 	if !ok {
-		log.Fatal("No quotation found for USD-BRL")
 		return nil, errors.New("no quotation found for USD-BRL")
 	}
 
@@ -69,7 +72,7 @@ func getDB() *sql.DB {
 	dbOnce.Do(func() {
 		log.Println("Starting database")
 
-		conn, err := sql.Open("sqlite3", "database.db")
+		conn, err := sql.Open("sqlite3", databaseName)
 		if err != nil {
 			log.Fatalf("Error on open database connection. %v", err)
 			panic(err)
@@ -105,7 +108,6 @@ func createTable(db *sql.DB) error {
 	)
 	`)
 	if err != nil {
-		log.Printf("Error on create table. %v", err)
 		return err
 	}
 
@@ -113,7 +115,7 @@ func createTable(db *sql.DB) error {
 }
 
 func registerQuotation(ctx context.Context, q *Quotation) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, databaseTimeout)
 	defer cancel()
 
 	db := getDB()
@@ -131,11 +133,10 @@ func registerQuotation(ctx context.Context, q *Quotation) error {
 		q.VarBID,
 	)
 	if err != nil {
-		log.Printf("Failed to insert quotation. %v", err)
 		return err
 	}
 
-	log.Printf("Quotation saved successfully!")
+	log.Println("Quotation saved successfully!")
 	return nil
 }
 
@@ -177,16 +178,14 @@ func init() {
 }
 
 func main() {
-	port := ":8080"
-
 	defer closeDB()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /cotacao", handlerQuotation)
 
-	log.Printf("Server is running on port %s", port)
+	log.Printf("Running server on port %s", serverPort)
 
-	if err := http.ListenAndServe(port, mux); err != nil && err != http.ErrServerClosed {
+	if err := http.ListenAndServe(serverPort, mux); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("Server listen failed. %v", err)
 		panic(err)
 	}
