@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	quotationURL string        = "https://localhost:8080/cotacao"
+	quotationURL string        = "http://localhost:8080/cotacao"
 	timeout      time.Duration = 300 * time.Millisecond
 	fileName     string        = "cotacao.txt"
 )
